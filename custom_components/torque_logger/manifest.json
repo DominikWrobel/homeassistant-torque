@@ -10,7 +10,7 @@
     "http"
   ],
   "requirements": [
-    "pint==0.19.2"
+    "pint>=0.24"
   ],
   "codeowners": [
     "@junalmeida"
