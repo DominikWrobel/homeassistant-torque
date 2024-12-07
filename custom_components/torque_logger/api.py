@@ -6,6 +6,10 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import callback
 from homeassistant.util import slugify
 
+# Add these imports to handle potential NumPy issues
+import numpy as np
+np.cumproduct = np.cumprod  # Patch the deprecated function
+
 from .const import TORQUE_GPS_ACCURACY, TORQUE_GPS_ALTITUDE, TORQUE_GPS_LAT, TORQUE_GPS_LON
 
 if TYPE_CHECKING:
