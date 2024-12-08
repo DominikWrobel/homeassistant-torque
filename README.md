@@ -40,8 +40,6 @@ If you like my work you can support me via:
 [torque]: https://torque-bhp.com/
 [buymecoffee]: https://buymeacoffee.com/dominikjwrc
 
-[commits-shield]: https://img.shields.io/github/commit-activity/y/junalmeida/homeassistant-torque.svg?style=plastic
-[commits]: https://github.com/junalmeida/homeassistant-torque/commits/master
 [hacs]: https://github.com/custom-components/hacs
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=plastic
 [license]: https://github.com/junalmeida/homeassistant-torque/blob/main/LICENSE
