@@ -2,14 +2,9 @@
 
 # Home Assistant - Torque Logger AddOn
 
-[![GitHub Release][releases-shield]][releases]
 [![License][license-shield]][license]
 
 [![hacs][hacsbadge]][hacs]
-[![Project Maintenance][maintenance-shield]][user_profile]
-
-[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
-[![Github Sponsor][githubsponsorbadge]][githubsponsorbadge]
 
 
 _Component to integrate with [Torque][torque]._
@@ -29,22 +24,18 @@ Platform | Description
 
 <!---->
 
-## Contributions are welcome!
+## Support
 
-If you want to contribute to this please read the [Contribution guidelines](CONTRIBUTING.md)
+If you like my work you can support me via:
 
-[^1]: Icons made by [Smashicons][iconcredit] from [flaticon.com][iconcreditsite]
+<figure class="wp-block-image size-large"><a href="https://www.buymeacoffee.com/dominikjwrc"><img src="https://homeassistantwithoutaplan.files.wordpress.com/2023/07/coffe-3.png?w=182" alt="" class="wp-image-64"/></a></figure>
 
 
 
 
 
 [torque]: https://torque-bhp.com/
-[buymecoffee]: https://www.buymeacoffee.com/junalmeida
-[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-%E2%98%95-yellow.svg?style=plastic
-
-[githubsponsor]: https://github.com/sponsors/junalmeida
-[githubsponsorbadge]: https://img.shields.io/badge/Sponsor%20me%20on%20Github-%F0%9F%92%8C-orange.svg?style=plastic
+[buymecoffee]: https://buymeacoffee.com/dominikjwrc
 
 [commits-shield]: https://img.shields.io/github/commit-activity/y/junalmeida/homeassistant-torque.svg?style=plastic
 [commits]: https://github.com/junalmeida/homeassistant-torque/commits/master
@@ -52,10 +43,7 @@ If you want to contribute to this please read the [Contribution guidelines](CONT
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=plastic
 [license]: https://github.com/junalmeida/homeassistant-torque/blob/main/LICENSE
 [license-shield]: https://img.shields.io/github/license/junalmeida/homeassistant-torque.svg?style=plastic
-[maintenance-shield]: https://img.shields.io/badge/maintainer-Marcos%20Junior%20%40junalmeida-blue.svg?style=plastic
-[releases-shield]: https://img.shields.io/github/release/junalmeida/homeassistant-torque.svg?style=plastic
-[releases]: https://github.com/junalmeida/homeassistant-torque/releases
-[user_profile]: https://github.com/junalmeida
+[user_profile]: https://github.com/DominikWrobel
 
 [iconcredit]: https://www.flaticon.com/authors/smashicons
 [iconcreditsite]: https://www.flaticon.com/
