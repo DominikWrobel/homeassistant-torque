@@ -2,15 +2,18 @@
   "domain": "torque_logger",
   "name": "Torque Logger",
   "documentation": "https://github.com/DominikWrobel/homeassistant-torque#readme",
-  "codeowners": ["@junalmeida", "@DominikWrobel"],
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/DominikWrobel/homeassistant-torque/issues",
-  "version": "1.2.c",
+  "version": "1.2.1",
   "config_flow": true,
   "dependencies": [
     "http"
   ],
   "requirements": [
     "pint>=0.24"
+  ],
+  "codeowners": [
+    "@junalmeida",
+    "@DominikWrobel"
   ]
 }
