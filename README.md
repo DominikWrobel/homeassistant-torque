@@ -1,4 +1,4 @@
-<img src="icon.png" align="right" width="128" />  
+<img src="icon@2x.png" align="right" width="128" />  
 
 # Home Assistant - Torque Logger AddOn
 
