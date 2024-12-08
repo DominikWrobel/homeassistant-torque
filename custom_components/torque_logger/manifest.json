@@ -12,5 +12,5 @@
   ],
   "requirements": [
     "pint>=0.24"
-  ],
+  ]
 }
