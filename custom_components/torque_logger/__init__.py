@@ -1,15 +1,12 @@
 """
 The Torque Logger integration with Home Assistant.
-
-For more details about this integration, please refer to
-https://github.com/junalmeida/homeassistant-torque#readme
 """
 
 import logging
 import asyncio
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Config, HomeAssistant
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .coordinator import TorqueLoggerCoordinator
@@ -47,10 +44,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     hass.http.register_view(client)
 
-    for platform in PLATFORMS:
-        hass.async_add_job(
-            hass.config_entries.async_forward_entry_setup(entry, platform)
-        )
+    # Use async_forward_entry_setups instead of async_forward_entry_setup
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
