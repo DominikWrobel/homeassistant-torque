@@ -9,6 +9,8 @@
 
 _Component to integrate with [Torque][torque]._
 
+Forked from https://github.com/junalmeida/homeassistant-torque
+
 **This component will set up the following platforms.**
 
 Platform | Description
@@ -18,9 +20,10 @@ Platform | Description
 
 ## Installation
 
-1. Click install, and restart HA when done;
-2. In the HA UI go to "Configuration" -> "Integrations" click "+" and search for "Torque Logger"
-3. Configuration is done in the UI.
+1. Add a custom repository to HACS with this link https://github.com/DominikWrobel/homeassistant-torque;
+2. Find Torque Logger and clik install and restart HA when done;
+4. In the HA UI go to "Configuration" -> "Integrations" click "+" and search for "Torque Logger"
+5. Configuration is done in the UI.
 
 <!---->
 
