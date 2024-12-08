@@ -1,4 +1,4 @@
-"""Adds config flow for Blueprint."""
+"""Adds config flow for Torque Logger."""
 from homeassistant import config_entries
 from homeassistant.core import callback
 import voluptuous as vol
@@ -51,7 +51,8 @@ class TorqueLoggerFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return TorqueLoggerOptionsFlowHandler(config_entry)
+        """Create the options flow."""
+        return TorqueLoggerOptionsFlowHandler()
 
     async def _show_config_form(self, user_input: dict):  # pylint: disable=unused-argument
         """Show the configuration form to edit location data."""
@@ -74,11 +75,6 @@ class TorqueLoggerFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 class TorqueLoggerOptionsFlowHandler(config_entries.OptionsFlow):
     """Torque Logger config flow options handler."""
 
-    def __init__(self, config_entry):
-        """Initialize HACS options flow."""
-        self.config_entry = config_entry
-        self.options = dict(config_entry.options)
-
     async def async_step_init(self, user_input=None):  # pylint: disable=unused-argument
         """Manage the options."""
         return await self.async_step_user()
@@ -86,21 +82,23 @@ class TorqueLoggerOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_user(self, user_input=None):
         """Handle a flow initialized by the user."""
         if user_input is not None:
-            self.options.update(user_input)
-            return await self._update_options()
+            return await self._update_options(user_input)
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(x, default=self.options.get(x, True)): bool
+                    vol.Required(
+                        x, default=self.config_entry.options.get(x, True)
+                    ): bool
                     for x in sorted(PLATFORMS)
                 }
             ),
         )
 
-    async def _update_options(self):
+    async def _update_options(self, user_input):
         """Update config entry options."""
         return self.async_create_entry(
-            title=self.config_entry.data.get(CONF_EMAIL), data=self.options
+            title=self.config_entry.data.get(CONF_EMAIL), 
+            data=user_input
         )
