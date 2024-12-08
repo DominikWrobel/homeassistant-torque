@@ -20,8 +20,8 @@ Platform | Description
 
 ## Installation
 
-1. Add a custom repository to HACS with this link https://github.com/DominikWrobel/homeassistant-torque;
-2. Find Torque Logger and clik install and restart HA when done;
+1. Add a custom repository to HACS with this link https://github.com/DominikWrobel/homeassistant-torque
+2. Find Torque Logger and clik install and restart HA when done
 4. In the HA UI go to "Configuration" -> "Integrations" click "+" and search for "Torque Logger"
 5. Configuration is done in the UI.
 
