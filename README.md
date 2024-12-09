@@ -7,7 +7,7 @@
 [![hacs][hacsbadge]][hacs]
 
 
-_Component to integrate with [Torque][torque]._
+_Component to integrate with [Torque] using [Torque app](https://play.google.com/store/apps/details?id=org.prowl.torque&hl=pl)._
 
 Forked from https://github.com/junalmeida/homeassistant-torque
 
