@@ -8,9 +8,10 @@ from homeassistant.util import slugify
 
 # Add these imports to handle potential NumPy issues
 import numpy as np
+
 np.cumproduct = np.cumprod  # Patch the deprecated function
 
-from .const import TORQUE_GPS_ACCURACY, TORQUE_GPS_ALTITUDE, TORQUE_GPS_LAT, TORQUE_GPS_LON
+from .const import TORQUE_CODES
 
 if TYPE_CHECKING:
     from .coordinator import TorqueLoggerCoordinator
@@ -33,68 +34,6 @@ prettyPint = {
     "foot": "ft",
 }
 
-assumedUnits = {
-    "04": "%",
-    "05": "°C",
-    "0c": "rpm",
-    "0d": "km/h",
-    "0f": "°C",
-    "11": "%",
-    "1f": "km",
-    "21": "km",
-    "2f": "%",
-    "31": "km",
-    "ff1001": "km/h",
-    "ff1006": "°",
-    "ff1005": "°",
-    "ff1239": "m",
-    "ff1010": "m",
-    "ff1007": "°",
-    "ff123a": "",
-    "ff1237": "km/h"
-}
-
-assumedShortName = {
-    "04": "engine_load",
-    "05": "coolant_temp",
-    "0c": "engine_rpm",
-    "0d": "speed",
-    "0f": "intake_temp",
-    "11": "throttle_pos",
-    "1f": "run_since_start",
-    "21": "dis_mil_on",
-    "2f": "fuel",
-    "31": "dis_mil_off",
-    "ff1001": "gps_spd",
-    "ff1006": TORQUE_GPS_LAT,
-    "ff1005": TORQUE_GPS_LON,
-    "ff1239": TORQUE_GPS_ACCURACY,
-    "ff1010": TORQUE_GPS_ALTITUDE,
-    "ff1007": "gps_brng",
-    "ff123a": "gps_sat",
-    "ff1237": "spd_diff"
-}
-
-assumedFullName = {
-    "04": "Engine Load",
-    "05": "Coolant Temperature",
-    "0c": "Engine RPM",
-    "0d": "Vehicle Speed",
-    "0f": "Intake Air Temperature",
-    "11": "Throttle Position",
-    "1f": "Distance Since Engine Start",
-    "21": "Distance with MIL on",
-    "2f": "Fuel Level",
-    "31": "Distance with MIL off",
-    "ff1001": "Vehicle Speed (GPS)",
-    "ff1006": "GPS Latitude",
-    "ff1005": "GPS Longitude",
-    "ff1239": "GPS Accuracy",
-    "ff1010": "GPS Altitude",
-    "ff1007": "GPS Bearing",
-    "ff123a": "GPS Satellites",
-    "ff1237": "GPS vs OBD Speed difference"
-}
 
 class TorqueReceiveDataView(HomeAssistantView):
     """Handle data from Torque requests."""
@@ -181,15 +120,18 @@ class TorqueReceiveDataView(HomeAssistantView):
 
             self.data[session]["unknown"].append({"key": key, "value": value})
 
-        if (self.data[session]["profile"]["email"] == self.email
-        and self.data[session]["profile"]["email"] != ""):
+        if (self.data[session]["profile"]["email"] == self.email and self.data[session]["profile"]["email"] != ""):
             return session
         raise Exception("Not configured email")
 
     def _get_field(self, session: str, key: str):
-        name: str = self.data[session]["fullName"].get(key, assumedFullName.get(key, key))
-        short_name: str = self.data[session]["shortName"].get(key, assumedShortName.get(key, key))
-        unit: str = self.data[session]["defaultUnit"].get(key, assumedUnits.get(key, ""))
+        # Checking default params
+        if (TORQUE_CODES.get(key) is None):
+            return
+
+        name: str = self.data[session]["fullName"].get(key, TORQUE_CODES[key].get("fullName", key))
+        short_name: str = self.data[session]["shortName"].get(key, TORQUE_CODES[key].get("shortName", key))
+        unit: str = self.data[session]["defaultUnit"].get(key, TORQUE_CODES[key].get("unit", ""))
         value = self.data[session]["value"].get(key)
 
         short_name = slugify(str(short_name))
@@ -219,6 +161,9 @@ class TorqueReceiveDataView(HomeAssistantView):
 
         for key, _ in self.data[session]["value"].items():
             row_data = self._get_field(session, key)
+            if row_data is None:
+                continue
+
             retdata[row_data["short_name"]] = row_data["value"]
             meta[row_data["short_name"]] = {
                 "name": row_data["name"],
@@ -243,6 +188,7 @@ class TorqueReceiveDataView(HomeAssistantView):
                 if self.data[key]["profile"]["id"] == current_id and "Name" in self.data[key]["profile"]]
             if len(other_sessions) == 0:
                 _LOGGER.error("Missing profile name from torque data.")
+                # session_data["profile"]["Name"] = "Vehicle"
                 return
             else:
                 session_data["profile"]["Name"] = other_sessions[0]["profile"]["Name"]
