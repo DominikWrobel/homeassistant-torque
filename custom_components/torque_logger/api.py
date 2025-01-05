@@ -128,8 +128,29 @@ class TorqueReceiveDataView(HomeAssistantView):
         raise Exception("Not configured email")
 
     def _get_field(self, session: str, key: str):
-        # Rest of the method remains the same
-        ...
+        # Checking default params
+        if (TORQUE_CODES.get(key) is None):
+            return
+
+        name: str = self.data[session]["fullName"].get(key, TORQUE_CODES[key].get("fullName", key))
+        short_name: str = self.data[session]["shortName"].get(key, TORQUE_CODES[key].get("shortName", key))
+        unit: str = self.data[session]["defaultUnit"].get(key, TORQUE_CODES[key].get("unit", ""))
+        value = self.data[session]["value"].get(key)
+
+        short_name = slugify(str(short_name))
+
+        if self.imperial is True:
+            if unit in imperalUnits:
+                conv = _pretty_convert_units(float(value), unit, imperalUnits[unit])
+                value = conv["value"]
+                unit = conv["unit"]
+
+        return {
+            "name": name,
+            "short_name": short_name,
+            "unit": unit,
+            "value": value,
+        }
 
     def _get_profile(self, session: str):
         return self.data[session]["profile"]
