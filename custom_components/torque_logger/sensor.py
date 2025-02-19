@@ -74,19 +74,11 @@ class TorqueSensor(TorqueEntity, RestoreSensor):
             self._attr_native_unit_of_measurement = (self.coordinator
                                                      .data["meta"][self.sensor_key]["unit"])
             sensor_name = self.coordinator.data["meta"].get(self.sensor_key)["name"]
-            # Add car name to the sensor name
-            self._attr_name = f"{self._car_name} {sensor_name}"
+            self._attr_name = sensor_name
             self._set_icon()
 
-        # Include config_entry.entry_id in the entity_id to ensure uniqueness
-        self.entity_id = f"{SENSOR}.{self.config_entry.entry_id}_{self._car_id}_{sensor_key}"
+        self.entity_id = f"{SENSOR}.{self._car_id}_{sensor_key}"
         self._restored_state = None
-
-    @property
-    def unique_id(self):
-        """Return a unique ID."""
-        # Include both config entry ID and car ID in the unique ID
-        return f"{self.config_entry.entry_id}_{self._car_id}_{self.sensor_key}"
 
     @property
     def native_value(self):
@@ -128,4 +120,3 @@ class TorqueSensor(TorqueEntity, RestoreSensor):
             self._attr_icon = CITY_ICON
         if re.search('speed', self._attr_name, re.IGNORECASE):
             self._attr_icon = SPEED_ICON
-
