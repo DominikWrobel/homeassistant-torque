@@ -1,3 +1,21 @@
+"""Device tracker for Torque Logger."""
+
+from typing import TYPE_CHECKING
+import logging
+
+from homeassistant.components.device_tracker.config_entry import TrackerEntity
+from homeassistant.components.device_tracker.const import (
+    DOMAIN,
+    SourceType
+)
+from homeassistant.const import (
+    ATTR_LATITUDE,
+    ATTR_LONGITUDE,
+    ATTR_GPS_ACCURACY
+)
+
+
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
