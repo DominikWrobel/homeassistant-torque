@@ -8,10 +8,9 @@ from homeassistant.util import slugify
 
 # Add these imports to handle potential NumPy issues
 import numpy as np
-
 np.cumproduct = np.cumprod  # Patch the deprecated function
 
-from .const import TORQUE_CODES
+from .const import TORQUE_GPS_ACCURACY, TORQUE_GPS_ALTITUDE, TORQUE_GPS_LAT, TORQUE_GPS_LON, TORQUE_CODES
 
 if TYPE_CHECKING:
     from .coordinator import TorqueLoggerCoordinator
@@ -34,6 +33,83 @@ prettyPint = {
     "foot": "ft",
 }
 
+# Generate the dictionaries from TORQUE_CODES
+assumedUnits = {}
+assumedShortName = {}
+assumedFullName = {}
+
+# Initialize with existing values
+assumedUnits = {
+    "04": "%",
+    "05": "°C",
+    "0c": "rpm",
+    "0d": "km/h",
+    "0f": "°C",
+    "11": "%",
+    "1f": "km",
+    "21": "km",
+    "2f": "%",
+    "31": "km",
+    "ff1001": "km/h",
+    "ff1006": "°",
+    "ff1005": "°",
+    "ff1239": "m",
+    "ff1010": "m",
+    "ff1007": "°",
+    "ff123a": "",
+    "ff1237": "km/h"
+}
+
+assumedShortName = {
+    "04": "engine_load",
+    "05": "coolant_temp",
+    "0c": "engine_rpm",
+    "0d": "speed",
+    "0f": "intake_temp",
+    "11": "throttle_pos",
+    "1f": "run_since_start",
+    "21": "dis_mil_on",
+    "2f": "fuel",
+    "31": "dis_mil_off",
+    "ff1001": "gps_spd",
+    "ff1006": TORQUE_GPS_LAT,
+    "ff1005": TORQUE_GPS_LON,
+    "ff1239": TORQUE_GPS_ACCURACY,
+    "ff1010": TORQUE_GPS_ALTITUDE,
+    "ff1007": "gps_brng",
+    "ff123a": "gps_sat",
+    "ff1237": "spd_diff"
+}
+
+assumedFullName = {
+    "04": "Engine Load",
+    "05": "Coolant Temperature",
+    "0c": "Engine RPM",
+    "0d": "Vehicle Speed",
+    "0f": "Intake Air Temperature",
+    "11": "Throttle Position",
+    "1f": "Distance Since Engine Start",
+    "21": "Distance with MIL on",
+    "2f": "Fuel Level",
+    "31": "Distance with MIL off",
+    "ff1001": "Vehicle Speed (GPS)",
+    "ff1006": "GPS Latitude",
+    "ff1005": "GPS Longitude",
+    "ff1239": "GPS Accuracy",
+    "ff1010": "GPS Altitude",
+    "ff1007": "GPS Bearing",
+    "ff123a": "GPS Satellites",
+    "ff1237": "GPS vs OBD Speed difference"
+}
+
+# Update from TORQUE_CODES to add all additional sensors
+for code, data in TORQUE_CODES.items():
+    if "unit" in data and data["unit"]:
+        assumedUnits[code] = data["unit"]
+    if "shortName" in data:
+        assumedShortName[code] = data["shortName"]
+    if "fullName" in data:
+        assumedFullName[code] = data["fullName"]
 
 class TorqueReceiveDataView(HomeAssistantView):
     """Handle data from Torque requests."""
@@ -47,12 +123,12 @@ class TorqueReceiveDataView(HomeAssistantView):
         self.data = data
         self.email = email
         self.imperial = imperial
-        # Add a unique URL suffix based on email to separate instances
-        self.url = f"/api/torque_logger/{slugify(email)}"
+        self.email = email
 
     @callback
     async def get(self, request):
         """Handle Torque data GET request."""
+        # hass = request.app["hass"]
         _LOGGER.debug(request.query)
         session = self.parse_fields(request.query)
         if session is not None:
@@ -61,15 +137,13 @@ class TorqueReceiveDataView(HomeAssistantView):
 
     def parse_fields(self, qdata):  # noqa
         """Handle Torque data request."""
+
         session: str = qdata.get("session")
         if session is None:
             raise Exception("No Session")
 
-        # Create a unique session ID that includes the email
-        unique_session = f"{self.email}_{session}"
-
-        if unique_session not in self.data:
-            self.data[unique_session] = {
+        if session not in self.data:
+            self.data[session] = {
                 "profile": {},
                 "unit": {},
                 "defaultUnit": {},
@@ -85,56 +159,52 @@ class TorqueReceiveDataView(HomeAssistantView):
                 continue
             if key.startswith("userShortName"):
                 item = key[13:]
-                self.data[unique_session]["shortName"][item] = value
+                self.data[session]["shortName"][item] = value
                 continue
             if key.startswith("userFullName"):
                 item = key[12:]
-                self.data[unique_session]["fullName"][item] = value
+                self.data[session]["fullName"][item] = value
                 continue
             if key.startswith("defaultUnit"):
                 item = key[11:]
-                self.data[unique_session]["defaultUnit"][item] = value
+                self.data[session]["defaultUnit"][item] = value
                 continue
             if key.startswith("k"):
                 item = key[1:]
                 if len(item) == 1:
                     item = "0" + item
-                self.data[unique_session]["value"][item] = value
+                self.data[session]["value"][item] = value
                 continue
             if key.startswith("profile"):
                 item = key[7:]
-                self.data[unique_session]["profile"][item] = value
+                self.data[session]["profile"][item] = value
                 continue
             if key == "eml":
-                self.data[unique_session]["profile"]["email"] = value
+                self.data[session]["profile"]["email"] = value
                 continue
             if key == "time":
-                self.data[unique_session]["time"] = value
+                self.data[session]["time"] = value
                 continue
             if key == "v":
-                self.data[unique_session]["profile"]["version"] = value
+                self.data[session]["profile"]["version"] = value
                 continue
             if key == "session":
                 continue
             if key == "id":
-                self.data[unique_session]["profile"]["id"] = value
+                self.data[session]["profile"]["id"] = value
                 continue
 
-            self.data[unique_session]["unknown"].append({"key": key, "value": value})
+            self.data[session]["unknown"].append({"key": key, "value": value})
 
-        if (self.data[unique_session]["profile"]["email"] == self.email and 
-            self.data[unique_session]["profile"]["email"] != ""):
-            return unique_session
+        if (self.data[session]["profile"]["email"] == self.email
+        and self.data[session]["profile"]["email"] != ""):
+            return session
         raise Exception("Not configured email")
 
     def _get_field(self, session: str, key: str):
-        # Checking default params
-        if (TORQUE_CODES.get(key) is None):
-            return
-
-        name: str = self.data[session]["fullName"].get(key, TORQUE_CODES[key].get("fullName", key))
-        short_name: str = self.data[session]["shortName"].get(key, TORQUE_CODES[key].get("shortName", key))
-        unit: str = self.data[session]["defaultUnit"].get(key, TORQUE_CODES[key].get("unit", ""))
+        name: str = self.data[session]["fullName"].get(key, assumedFullName.get(key, key))
+        short_name: str = self.data[session]["shortName"].get(key, assumedShortName.get(key, key))
+        unit: str = self.data[session]["defaultUnit"].get(key, assumedUnits.get(key, ""))
         value = self.data[session]["value"].get(key)
 
         short_name = slugify(str(short_name))
@@ -152,6 +222,7 @@ class TorqueReceiveDataView(HomeAssistantView):
             "value": value,
         }
 
+
     def _get_profile(self, session: str):
         return self.data[session]["profile"]
 
@@ -163,9 +234,6 @@ class TorqueReceiveDataView(HomeAssistantView):
 
         for key, _ in self.data[session]["value"].items():
             row_data = self._get_field(session, key)
-            if row_data is None:
-                continue
-
             retdata[row_data["short_name"]] = row_data["value"]
             meta[row_data["short_name"]] = {
                 "name": row_data["name"],
@@ -173,29 +241,26 @@ class TorqueReceiveDataView(HomeAssistantView):
             }
 
         retdata["meta"] = meta
-        # Add the instance identifier to the data
-        retdata["instance_id"] = self.email
 
         return retdata
 
     async def _async_publish_data(self, session: str):
         session_data = self._get_data(session)
+        # Do not publish until we have at least the car name
+        # Why don't I use Id? Because you may have multiple
+        # phones pushing data on the same car, and ids would differ.
         if "Name" not in session_data["profile"]:
+            # do we have another session with the same profile id?
             current_id = session_data["profile"]["id"]
-            # Only look for sessions with the same email
             other_sessions = [
                 self.data[key]
                 for key in self.data.keys()
-                if (self.data[key]["profile"]["id"] == current_id and 
-                    key.startswith(self.email) and 
-                    "Name" in self.data[key]["profile"])
-            ]
+                if self.data[key]["profile"]["id"] == current_id and "Name" in self.data[key]["profile"]]
             if len(other_sessions) == 0:
                 _LOGGER.error("Missing profile name from torque data.")
                 return
             else:
                 session_data["profile"]["Name"] = other_sessions[0]["profile"]["Name"]
-
         if (self.coordinator is None or self.coordinator.async_set_updated_data is None):
             raise Exception("Invalid coordinator state")
 
