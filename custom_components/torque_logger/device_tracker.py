@@ -124,3 +124,4 @@ class TorqueDeviceTracker(TorqueEntity, TrackerEntity, RestoreEntity):
             ATTR_LONGITUDE: attr.get(ATTR_LONGITUDE),
             ATTR_GPS_ACCURACY: attr.get(ATTR_GPS_ACCURACY)
         }
+
