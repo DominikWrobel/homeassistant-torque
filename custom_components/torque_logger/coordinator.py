@@ -82,3 +82,4 @@ class TorqueLoggerCoordinator(DataUpdateCoordinator):
             self.async_add_device_tracker(new_trackers)
         
         _LOGGER.debug("Tracked entities: %s", ", ".join(self.tracked))
+
