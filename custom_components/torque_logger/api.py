@@ -286,7 +286,7 @@ def _unpretty_units(unit):
 def _convert_units(value, u_in, u_out):
     q_in = ureg.Quantity(value, u_in)
     q_out = q_in.to(u_out)
-    return {"value": round(q_out.magnitude, 2), "unit": str(q_out.units)}
+    return {"value": q_out.magnitude, "unit": str(q_out.units)}
 
 
 def _pretty_convert_units(value, u_in, u_out):
