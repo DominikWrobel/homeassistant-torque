@@ -1,0 +1,40 @@
+{
+  "title": "Torque Logger",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dodaj pojazd",
+        "description": "Utwórz osobny endpoint Torque dla tego pojazdu. Przykład: {example}",
+        "data": {
+          "vehicle_name": "Nazwa pojazdu",
+          "endpoint_id": "Identyfikator endpointu (opcjonalnie)"
+        },
+        "data_description": {
+          "endpoint_id": "Pozostaw puste, aby wygenerować automatycznie z nazwy pojazdu."
+        }
+      }
+    },
+    "error": {
+      "vehicle_name_required": "Nazwa pojazdu jest wymagana.",
+      "invalid_endpoint": "Nie udało się utworzyć poprawnego identyfikatora endpointu.",
+      "endpoint_exists": "Ten identyfikator endpointu jest już używany przez inny pojazd."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ustawienia pojazdu",
+        "description": "Aktualny endpoint: {endpoint}",
+        "data": {
+          "vehicle_name": "Nazwa pojazdu",
+          "endpoint_id": "Identyfikator endpointu"
+        }
+      }
+    },
+    "error": {
+      "vehicle_name_required": "Nazwa pojazdu jest wymagana.",
+      "invalid_endpoint": "Nie udało się utworzyć poprawnego identyfikatora endpointu.",
+      "endpoint_exists": "Ten identyfikator endpointu jest już używany przez inny pojazd."
+    }
+  }
+}
