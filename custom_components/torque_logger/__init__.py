@@ -1,73 +1,89 @@
-"""
-The Torque Logger integration with Home Assistant.
-"""
+"""Torque Logger integration."""
+
+from __future__ import annotations
 
 import logging
-import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 
-from .coordinator import TorqueLoggerCoordinator
-from .api import TorqueReceiveDataView
-
+from .api import register_http_views
 from .const import (
-    CONF_EMAIL,
+    DATA_API_REGISTERED,
+    DATA_ENDPOINTS,
+    DATA_VEHICLES,
     DOMAIN,
     PLATFORMS,
-    STARTUP_MESSAGE,
 )
+from .models import TorqueVehicle
 
-_LOGGER: logging.Logger = logging.getLogger(__package__)
+_LOGGER = logging.getLogger(__name__)
 
-async def async_setup(*_):
-    """Set up this integration using YAML is not supported."""
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up Torque Logger."""
+    domain_data = hass.data.setdefault(
+        DOMAIN,
+        {
+            DATA_VEHICLES: {},
+            DATA_ENDPOINTS: {},
+            DATA_API_REGISTERED: False,
+        },
+    )
+
+    if not domain_data[DATA_API_REGISTERED]:
+        register_http_views(hass)
+        domain_data[DATA_API_REGISTERED] = True
+
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Set up this integration using UI."""
-    if hass.data.get(DOMAIN) is None:
-        hass.data.setdefault(DOMAIN, {})
-        _LOGGER.info(STARTUP_MESSAGE)
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up one vehicle."""
+    domain_data = hass.data.setdefault(
+        DOMAIN,
+        {
+            DATA_VEHICLES: {},
+            DATA_ENDPOINTS: {},
+            DATA_API_REGISTERED: False,
+        },
+    )
 
-    hass.data[DOMAIN][entry.entry_id] = {}
-    hass.data[DOMAIN][entry.entry_id]["data"] = {}
-    email = entry.data.get(CONF_EMAIL)
+    if not domain_data[DATA_API_REGISTERED]:
+        register_http_views(hass)
+        domain_data[DATA_API_REGISTERED] = True
 
-    client = TorqueReceiveDataView(hass.data[DOMAIN][entry.entry_id]["data"], email, False)
-    coordinator = TorqueLoggerCoordinator(hass, client, entry)
-    client.coordinator = coordinator
+    vehicle = TorqueVehicle(hass, entry)
+    await vehicle.async_load()
 
-    hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    domain_data[DATA_VEHICLES][entry.entry_id] = vehicle
+    domain_data[DATA_ENDPOINTS][vehicle.endpoint_id] = entry.entry_id
 
-    hass.http.register_view(client)
-
-    # Use async_forward_entry_setups instead of async_forward_entry_setup
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     return True
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload entry after options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Handle removal of an entry."""
-    unloaded = all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            ]
-        )
-    )
-    if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id)
+    """Unload one vehicle."""
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unloaded:
+        return False
 
-    return unloaded
+    domain_data = hass.data.get(DOMAIN, {})
+    vehicle = domain_data.get(DATA_VEHICLES, {}).pop(entry.entry_id, None)
+    if vehicle is not None:
+        domain_data.get(DATA_ENDPOINTS, {}).pop(vehicle.endpoint_id, None)
+
+    return True
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove persistent data after deleting a vehicle entry."""
+    vehicle = TorqueVehicle(hass, entry)
+    await vehicle.async_remove_storage()

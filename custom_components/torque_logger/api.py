@@ -1,296 +1,171 @@
-"""Torque Logger API Client/DataView."""
-from typing import TYPE_CHECKING
+"""HTTP API for Torque Logger."""
+
+from __future__ import annotations
+
 import logging
-import pint
+from typing import Any
+
+from aiohttp import web
+
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant
 from homeassistant.util import slugify
 
-# Add these imports to handle potential NumPy issues
-import numpy as np
-np.cumproduct = np.cumprod  # Patch the deprecated function
+from .const import (
+    API_BASE,
+    API_VEHICLE,
+    CONF_ENDPOINT_ID,
+    DATA_ENDPOINTS,
+    DATA_VEHICLES,
+    DOMAIN,
+)
 
-from .const import TORQUE_GPS_ACCURACY, TORQUE_GPS_ALTITUDE, TORQUE_GPS_LAT, TORQUE_GPS_LON, TORQUE_CODES
-
-if TYPE_CHECKING:
-    from .coordinator import TorqueLoggerCoordinator
-
-TIMEOUT = 10
-_LOGGER: logging.Logger = logging.getLogger(__package__)
-
-ureg = pint.UnitRegistry()
-
-imperalUnits = {"km": "mi", "°C": "°F", "km/h": "mph", "m": "ft"}
-
-prettyPint = {
-    "degC": "°C",
-    "degF": "°F",
-    "mile / hour": "mph",
-    "kilometer / hour": "km/h",
-    "mile": "mi",
-    "kilometer": "km",
-    "meter": "m",
-    "foot": "ft",
-}
-
-# Generate the dictionaries from TORQUE_CODES
-assumedUnits = {}
-assumedShortName = {}
-assumedFullName = {}
-
-# Initialize with existing values
-assumedUnits = {
-    "04": "%",
-    "05": "°C",
-    "0c": "rpm",
-    "0d": "km/h",
-    "0f": "°C",
-    "11": "%",
-    "1f": "km",
-    "21": "km",
-    "2f": "%",
-    "31": "km",
-    "ff1001": "km/h",
-    "ff1006": "°",
-    "ff1005": "°",
-    "ff1239": "m",
-    "ff1010": "m",
-    "ff1007": "°",
-    "ff123a": "",
-    "ff1237": "km/h"
-}
-
-assumedShortName = {
-    "04": "engine_load",
-    "05": "coolant_temp",
-    "0c": "engine_rpm",
-    "0d": "speed",
-    "0f": "intake_temp",
-    "11": "throttle_pos",
-    "1f": "run_since_start",
-    "21": "dis_mil_on",
-    "2f": "fuel",
-    "31": "dis_mil_off",
-    "ff1001": "gps_spd",
-    "ff1006": TORQUE_GPS_LAT,
-    "ff1005": TORQUE_GPS_LON,
-    "ff1239": TORQUE_GPS_ACCURACY,
-    "ff1010": TORQUE_GPS_ALTITUDE,
-    "ff1007": "gps_brng",
-    "ff123a": "gps_sat",
-    "ff1237": "spd_diff"
-}
-
-assumedFullName = {
-    "04": "Engine Load",
-    "05": "Coolant Temperature",
-    "0c": "Engine RPM",
-    "0d": "Vehicle Speed",
-    "0f": "Intake Air Temperature",
-    "11": "Throttle Position",
-    "1f": "Distance Since Engine Start",
-    "21": "Distance with MIL on",
-    "2f": "Fuel Level",
-    "31": "Distance with MIL off",
-    "ff1001": "Vehicle Speed (GPS)",
-    "ff1006": "GPS Latitude",
-    "ff1005": "GPS Longitude",
-    "ff1239": "GPS Accuracy",
-    "ff1010": "GPS Altitude",
-    "ff1007": "GPS Bearing",
-    "ff123a": "GPS Satellites",
-    "ff1237": "GPS vs OBD Speed difference"
-}
-
-# Update from TORQUE_CODES to add all additional sensors
-for code, data in TORQUE_CODES.items():
-    if "unit" in data and data["unit"]:
-        assumedUnits[code] = data["unit"]
-    if "shortName" in data:
-        assumedShortName[code] = data["shortName"]
-    if "fullName" in data:
-        assumedFullName[code] = data["fullName"]
-
-class TorqueReceiveDataView(HomeAssistantView):
-    """Handle data from Torque requests."""
-
-    url = "/api/torque_logger"
-    name = "api:torque_logger"
-    coordinator: 'TorqueLoggerCoordinator'
-
-    def __init__(self, data: dict, email: str, imperial: bool):
-        """Initialize a Torque view."""
-        self.data = data
-        self.email = email
-        self.imperial = imperial
-        self.email = email
-
-    @callback
-    async def get(self, request):
-        """Handle Torque data GET request."""
-        # hass = request.app["hass"]
-        _LOGGER.debug(request.query)
-        session = self.parse_fields(request.query)
-        if session is not None:
-            await self._async_publish_data(session)
-        return "OK!"
-
-    def parse_fields(self, qdata):  # noqa
-        """Handle Torque data request."""
-
-        session: str = qdata.get("session")
-        if session is None:
-            raise Exception("No Session")
-
-        if session not in self.data:
-            self.data[session] = {
-                "profile": {},
-                "unit": {},
-                "defaultUnit": {},
-                "fullName": {},
-                "shortName": {},
-                "value": {},
-                "unknown": [],
-                "time": 0,
-            }
-
-        for key, value in qdata.items():
-            if key.startswith("userUnit"):
-                continue
-            if key.startswith("userShortName"):
-                item = key[13:]
-                self.data[session]["shortName"][item] = value
-                continue
-            if key.startswith("userFullName"):
-                item = key[12:]
-                self.data[session]["fullName"][item] = value
-                continue
-            if key.startswith("defaultUnit"):
-                item = key[11:]
-                self.data[session]["defaultUnit"][item] = value
-                continue
-            if key.startswith("k"):
-                item = key[1:]
-                if len(item) == 1:
-                    item = "0" + item
-                self.data[session]["value"][item] = value
-                continue
-            if key.startswith("profile"):
-                item = key[7:]
-                self.data[session]["profile"][item] = value
-                continue
-            if key == "eml":
-                self.data[session]["profile"]["email"] = value
-                continue
-            if key == "time":
-                self.data[session]["time"] = value
-                continue
-            if key == "v":
-                self.data[session]["profile"]["version"] = value
-                continue
-            if key == "session":
-                continue
-            if key == "id":
-                self.data[session]["profile"]["id"] = value
-                continue
-
-            self.data[session]["unknown"].append({"key": key, "value": value})
-
-        if (self.data[session]["profile"]["email"] == self.email
-        and self.data[session]["profile"]["email"] != ""):
-            return session
-        raise Exception("Not configured email")
-
-    def _get_field(self, session: str, key: str):
-        name: str = self.data[session]["fullName"].get(key, assumedFullName.get(key, key))
-        short_name: str = self.data[session]["shortName"].get(key, assumedShortName.get(key, key))
-        unit: str = self.data[session]["defaultUnit"].get(key, assumedUnits.get(key, ""))
-        value = self.data[session]["value"].get(key)
-
-        short_name = slugify(str(short_name))
-
-        if self.imperial is True:
-            if unit in imperalUnits:
-                conv = _pretty_convert_units(float(value), unit, imperalUnits[unit])
-                value = conv["value"]
-                unit = conv["unit"]
-
-        return {
-            "name": name,
-            "short_name": short_name,
-            "unit": unit,
-            "value": value,
-        }
+_LOGGER = logging.getLogger(__name__)
 
 
-    def _get_profile(self, session: str):
-        return self.data[session]["profile"]
-
-    def _get_data(self, session: str):
-        retdata = {}
-        retdata["profile"] = self._get_profile(session)
-        retdata["time"] = self.data[session]["time"]
-        meta = {}
-
-        for key, _ in self.data[session]["value"].items():
-            row_data = self._get_field(session, key)
-            retdata[row_data["short_name"]] = row_data["value"]
-            meta[row_data["short_name"]] = {
-                "name": row_data["name"],
-                "unit": row_data["unit"],
-            }
-
-        retdata["meta"] = meta
-
-        return retdata
-
-    async def _async_publish_data(self, session: str):
-        session_data = self._get_data(session)
-        # Do not publish until we have at least the car name
-        # Why don't I use Id? Because you may have multiple
-        # phones pushing data on the same car, and ids would differ.
-        if "Name" not in session_data["profile"]:
-            # do we have another session with the same profile id?
-            current_id = session_data["profile"]["id"]
-            other_sessions = [
-                self.data[key]
-                for key in self.data.keys()
-                if self.data[key]["profile"]["id"] == current_id and "Name" in self.data[key]["profile"]]
-            if len(other_sessions) == 0:
-                _LOGGER.error("Missing profile name from torque data.")
-                return
-            else:
-                session_data["profile"]["Name"] = other_sessions[0]["profile"]["Name"]
-        if (self.coordinator is None or self.coordinator.async_set_updated_data is None):
-            raise Exception("Invalid coordinator state")
-
-        self.coordinator.async_set_updated_data(session_data)
-        await self.coordinator.add_entities(session_data)
+def register_http_views(hass: HomeAssistant) -> None:
+    """Register Torque HTTP endpoints once."""
+    hass.http.register_view(TorqueVehicleView)
+    hass.http.register_view(TorqueLegacyView)
 
 
-def _pretty_units(unit):
-    if unit in prettyPint:
-        return prettyPint[unit]
+async def _request_payload(request: web.Request) -> dict[str, Any]:
+    """Merge query-string and POST body fields."""
+    payload: dict[str, Any] = dict(request.query)
 
-    return unit
+    if request.method != "POST":
+        return payload
+
+    content_type = (request.content_type or "").lower()
+
+    try:
+        if content_type == "application/json":
+            body = await request.json()
+            if isinstance(body, dict):
+                payload.update(body)
+        else:
+            form = await request.post()
+            payload.update(dict(form))
+    except Exception as err:  # malformed upload should not crash HA
+        _LOGGER.debug("Could not parse Torque POST body: %s", err)
+
+    return payload
 
 
-def _unpretty_units(unit):
-    for pint_unit, pretty_unit in prettyPint.items():
-        if pretty_unit == unit:
-            return pint_unit
-
-    return unit
-
-
-def _convert_units(value, u_in, u_out):
-    q_in = ureg.Quantity(value, u_in)
-    q_out = q_in.to(u_out)
-    return {"value": q_out.magnitude, "unit": str(q_out.units)}
+def _vehicle_by_endpoint(hass: HomeAssistant, vehicle_id: str):
+    domain_data = hass.data.get(DOMAIN, {})
+    endpoint_map = domain_data.get(DATA_ENDPOINTS, {})
+    entry_id = endpoint_map.get(slugify(vehicle_id))
+    if not entry_id:
+        return None
+    return domain_data.get(DATA_VEHICLES, {}).get(entry_id)
 
 
-def _pretty_convert_units(value, u_in, u_out):
-    p_in = _unpretty_units(u_in)
-    p_out = _unpretty_units(u_out)
-    res = _convert_units(value, p_in, p_out)
-    return {"value": res["value"], "unit": _pretty_units(res["unit"])}
+def _vehicle_for_legacy(hass: HomeAssistant, payload: dict[str, Any]):
+    """Resolve legacy /api/torque_logger upload."""
+    domain_data = hass.data.get(DOMAIN, {})
+    vehicles = list(domain_data.get(DATA_VEHICLES, {}).values())
+
+    if not vehicles:
+        return None
+
+    if len(vehicles) == 1:
+        return vehicles[0]
+
+    profile_name = str(payload.get("profileName", "")).strip()
+    if profile_name:
+        profile_slug = slugify(profile_name)
+        for vehicle in vehicles:
+            if profile_slug in {
+                slugify(vehicle.vehicle_name),
+                slugify(vehicle.endpoint_id),
+            }:
+                return vehicle
+
+    # Optional legacy email matching if an older entry happens to contain it.
+    email = str(payload.get("eml", "")).strip().lower()
+    if email:
+        for vehicle in vehicles:
+            configured = str(vehicle.entry.data.get("email", "")).strip().lower()
+            if configured and configured == email:
+                return vehicle
+
+    return None
+
+
+async def _handle_vehicle_upload(
+    request: web.Request,
+    vehicle,
+) -> web.Response:
+    payload = await _request_payload(request)
+
+    if not payload:
+        return web.Response(status=400, text="No Torque data received")
+
+    updated = vehicle.async_process_payload(payload)
+    _LOGGER.debug(
+        "Torque upload for %s: %s values updated",
+        vehicle.vehicle_name,
+        updated,
+    )
+    return web.Response(text="OK")
+
+
+class TorqueVehicleView(HomeAssistantView):
+    """Vehicle-specific Torque endpoint."""
+
+    url = API_VEHICLE
+    name = "api:torque_logger:vehicle"
+    requires_auth = True
+
+    async def get(self, request: web.Request, vehicle_id: str) -> web.Response:
+        vehicle = _vehicle_by_endpoint(request.app["hass"], vehicle_id)
+        if vehicle is None:
+            return web.Response(status=404, text="Unknown Torque vehicle")
+        return await _handle_vehicle_upload(request, vehicle)
+
+    async def post(self, request: web.Request, vehicle_id: str) -> web.Response:
+        vehicle = _vehicle_by_endpoint(request.app["hass"], vehicle_id)
+        if vehicle is None:
+            return web.Response(status=404, text="Unknown Torque vehicle")
+        return await _handle_vehicle_upload(request, vehicle)
+
+
+class TorqueLegacyView(HomeAssistantView):
+    """Backward-compatible /api/torque_logger endpoint."""
+
+    url = API_BASE
+    name = "api:torque_logger:legacy"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        payload = await _request_payload(request)
+        vehicle = _vehicle_for_legacy(request.app["hass"], payload)
+        if vehicle is None:
+            return web.Response(
+                status=409,
+                text=(
+                    "Multiple Torque vehicles are configured. "
+                    "Use /api/torque_logger/<vehicle_id>."
+                ),
+            )
+        if not payload:
+            return web.Response(status=400, text="No Torque data received")
+        vehicle.async_process_payload(payload)
+        return web.Response(text="OK")
+
+    async def post(self, request: web.Request) -> web.Response:
+        payload = await _request_payload(request)
+        vehicle = _vehicle_for_legacy(request.app["hass"], payload)
+        if vehicle is None:
+            return web.Response(
+                status=409,
+                text=(
+                    "Multiple Torque vehicles are configured. "
+                    "Use /api/torque_logger/<vehicle_id>."
+                ),
+            )
+        if not payload:
+            return web.Response(status=400, text="No Torque data received")
+        vehicle.async_process_payload(payload)
+        return web.Response(text="OK")
