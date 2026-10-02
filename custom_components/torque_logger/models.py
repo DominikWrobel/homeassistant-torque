@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import math
-import asyncio
+import re
 import re
 from time import monotonic
 from typing import Any
@@ -66,9 +66,8 @@ class TorqueVehicle:
         self.gps_longitude: float | None = None
         self.gps_accuracy: float | None = None
         self.last_update: datetime | None = None
-        self._publish_handle = None
-        self._pending_pids: set[str] = set()
-        self._pending_new: set[str] = set()
+        self._active_session: str | None = None
+        self._last_update_entity_publish = float("-inf")
         self._last_save = float("-inf")
         self._dirty = False
         self._listeners: list[Callable[[str, str | None], None]] = []
@@ -130,6 +129,7 @@ class TorqueVehicle:
         # beta.1 stored altitude as accuracy; recompute from actual accuracy PID.
         self.gps_accuracy = _first_float({}, GPS_ACCURACY_KEYS, self.pids)
 
+        self._active_session = data.get("active_session")
         raw_last_update = data.get("last_update")
         if isinstance(raw_last_update, str):
             try:
@@ -148,6 +148,7 @@ class TorqueVehicle:
             "gps_longitude": self.gps_longitude,
             "gps_accuracy": self.gps_accuracy,
             "last_update": self.last_update.isoformat() if self.last_update else None,
+            "active_session": self._active_session,
         }
 
     @callback
@@ -173,20 +174,31 @@ class TorqueVehicle:
     def async_process_payload(self, payload: dict[str, Any]) -> int:
         """Process one Torque upload. Returns number of updated PID values."""
         normalized = {str(key).strip().lower(): value for key, value in payload.items() if value is not None}
-        # Capture only mutations; do not publish all entities for every upload.
         before = {pid: (info.value, info.name, info.short_name, info.unit) for pid, info in self.pids.items()}
         old_gps = (self.gps_latitude, self.gps_longitude, self.gps_accuracy)
 
+        # Torque's session identifies a continuous logging run. The original
+        # integration kept a separate value set per session; clear live values
+        # when Torque starts a new run, while keeping discovered sensor metadata.
+        session = _clean_text(normalized.get("session"))
+        session_changed = bool(session and self._active_session and session != self._active_session)
+        if session:
+            self._active_session = session
+        if session_changed:
+            for info in self.pids.values():
+                info.value = None
+            self.gps_latitude = self.gps_longitude = self.gps_accuracy = None
+
+        # Apply metadata packets even when Torque sends them separately from values.
         for key, raw in normalized.items():
-            lower = key.lower()
             for prefix, field in (("userfullname", "name"), ("usershortname", "short_name"), ("defaultunit", "unit")):
-                if lower.startswith(prefix):
-                    pid = lower[len(prefix):]
-                    info = self.pids.get(pid)
-                    if info is not None:
-                        text = _clean_text(raw)
-                        if text:
-                            setattr(info, field, _normalize_unit(text) if field == "unit" else text)
+                if key.startswith(prefix):
+                    pid = _canonical_pid(key[len(prefix):])
+                    for existing_pid, info in self.pids.items():
+                        if _canonical_pid(existing_pid) == pid:
+                            text = _clean_text(raw)
+                            if text:
+                                setattr(info, field, _normalize_unit(text) if field == "unit" else text)
                     break
 
         updated = 0
@@ -199,7 +211,9 @@ class TorqueVehicle:
             if not re.fullmatch(r"k[0-9a-f]{1,16}", lower_key):
                 continue
 
-            pid = key[1:].lower()
+            pid = _canonical_pid(key[1:])
+            # Reuse an existing legacy one-digit key if this installation has it.
+            pid = next((old for old in self.pids if _canonical_pid(old) == pid), pid)
 
             # Metadata fields are not values.
             if pid.startswith(("userfullname", "usershortname", "defaultunit")):
@@ -214,18 +228,9 @@ class TorqueVehicle:
                 )
                 continue
 
-            full_name = _lookup_case_insensitive(
-                normalized,
-                f"userFullName{key[1:]}",
-            )
-            short_name = _lookup_case_insensitive(
-                normalized,
-                f"userShortName{key[1:]}",
-            )
-            unit = _lookup_case_insensitive(
-                normalized,
-                f"defaultUnit{key[1:]}",
-            )
+            full_name = _lookup_pid_metadata(normalized, "userfullname", key[1:])
+            short_name = _lookup_pid_metadata(normalized, "usershortname", key[1:])
+            unit = _lookup_pid_metadata(normalized, "defaultunit", key[1:])
 
             value = _clean_value(raw_value)
             if value is None:
@@ -289,19 +294,28 @@ class TorqueVehicle:
         self.gps_longitude = _first_float(normalized, GPS_LON_KEYS, self.pids)
         self.gps_accuracy = _first_float(normalized, GPS_ACCURACY_KEYS, self.pids)
 
-        if not updated and before == {pid: (info.value, info.name, info.short_name, info.unit) for pid, info in self.pids.items()}:
+        after = {pid: (info.value, info.name, info.short_name, info.unit) for pid, info in self.pids.items()}
+        changed_pids = {pid for pid, state in after.items() if before.get(pid) != state}
+        if not updated and not changed_pids and old_gps == (self.gps_latitude, self.gps_longitude, self.gps_accuracy):
             return 0
 
         self.last_update = datetime.now(timezone.utc)
 
-        self._pending_new.update(new_pids)
-        self._pending_pids.update(pid for pid, info in self.pids.items() if before.get(pid) != (info.value, info.name, info.short_name, info.unit))
+        # Publish values immediately. Coalescing these events caused the live
+        # stream to skip samples and made speed appear to jump in 5 s steps.
+        for pid in new_pids:
+            self._notify("new_pid", pid)
+        for pid in changed_pids:
+            self._notify("updated", pid)
         if old_gps != (self.gps_latitude, self.gps_longitude, self.gps_accuracy):
-            self._pending_pids.add("__location__")
-        self._pending_pids.add("__last_update__")
+            self._notify("updated", "__location__")
+        # Last-update is diagnostic; publishing it on every Torque packet only
+        # creates avoidable Recorder writes, so limit that entity to 30 seconds.
+        if monotonic() - self._last_update_entity_publish >= 30:
+            self._last_update_entity_publish = monotonic()
+            self._notify("updated", "__last_update__")
+
         self._dirty = True
-        if self._publish_handle is None:
-            self._publish_handle = asyncio.get_running_loop().call_later(5, self._publish_pending)
         if monotonic() - self._last_save >= 60:
             self._last_save = monotonic()
             self._store.async_delay_save(self._data_to_store, 1)
@@ -319,13 +333,26 @@ class TorqueVehicle:
 
     async def async_shutdown(self) -> None:
         """Cancel delayed publication and flush latest values on clean unload."""
-        if self._publish_handle is not None:
-            self._publish_handle.cancel()
-            self._publish_handle = None
         if self._dirty:
             await self._store.async_save(self._data_to_store())
         self._listeners.clear()
 
+
+
+def _canonical_pid(pid: str) -> str:
+    """Match the original parser: standard one-digit PIDs are two digits."""
+    value = pid.lower()
+    if re.fullmatch(r"[0-9a-f]", value):
+        return value.zfill(2)
+    return value
+
+
+def _lookup_pid_metadata(data: dict[str, Any], prefix: str, pid: str) -> Any:
+    canonical = _canonical_pid(pid)
+    for key, value in data.items():
+        if key.startswith(prefix) and _canonical_pid(key[len(prefix):]) == canonical:
+            return value
+    return None
 
 def _lookup_case_insensitive(data: dict[str, Any], wanted: str) -> Any:
     return data.get(wanted.lower())
