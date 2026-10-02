@@ -1,3 +1,5 @@
+This integration will not be maintained, I switched to (https://github.com/JOHLC/Home-Assistant-Torque-OBDII)
+
 <img src="icon@2x.png" align="right" width="128" />  
 
 # Home Assistant - Torque Logger AddOn
