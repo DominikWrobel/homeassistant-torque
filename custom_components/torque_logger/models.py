@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import math
+import asyncio
+import re
+from time import monotonic
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -63,6 +66,11 @@ class TorqueVehicle:
         self.gps_longitude: float | None = None
         self.gps_accuracy: float | None = None
         self.last_update: datetime | None = None
+        self._publish_handle = None
+        self._pending_pids: set[str] = set()
+        self._pending_new: set[str] = set()
+        self._last_save = float("-inf")
+        self._dirty = False
         self._listeners: list[Callable[[str, str | None], None]] = []
         self._store: Store[dict[str, Any]] = Store(
             hass,
@@ -164,11 +172,10 @@ class TorqueVehicle:
     @callback
     def async_process_payload(self, payload: dict[str, Any]) -> int:
         """Process one Torque upload. Returns number of updated PID values."""
-        normalized = {
-            str(key).strip(): value
-            for key, value in payload.items()
-            if value is not None
-        }
+        normalized = {str(key).strip().lower(): value for key, value in payload.items() if value is not None}
+        # Capture only mutations; do not publish all entities for every upload.
+        before = {pid: (info.value, info.name, info.short_name, info.unit) for pid, info in self.pids.items()}
+        old_gps = (self.gps_latitude, self.gps_longitude, self.gps_accuracy)
 
         for key, raw in normalized.items():
             lower = key.lower()
@@ -189,7 +196,7 @@ class TorqueVehicle:
         # userFullName<PID>, userShortName<PID>, defaultUnit<PID>.
         for key, raw_value in normalized.items():
             lower_key = key.lower()
-            if not lower_key.startswith("k") or len(key) <= 1:
+            if not re.fullmatch(r"k[0-9a-f]{1,16}", lower_key):
                 continue
 
             pid = key[1:].lower()
@@ -282,22 +289,46 @@ class TorqueVehicle:
         self.gps_longitude = _first_float(normalized, GPS_LON_KEYS, self.pids)
         self.gps_accuracy = _first_float(normalized, GPS_ACCURACY_KEYS, self.pids)
 
+        if not updated and before == {pid: (info.value, info.name, info.short_name, info.unit) for pid, info in self.pids.items()}:
+            return 0
+
         self.last_update = datetime.now(timezone.utc)
 
-        for pid in new_pids:
-            self._notify("new_pid", pid)
-        self._notify("updated", None)
-
-        self._store.async_delay_save(self._data_to_store, 5)
+        self._pending_new.update(new_pids)
+        self._pending_pids.update(pid for pid, info in self.pids.items() if before.get(pid) != (info.value, info.name, info.short_name, info.unit))
+        if old_gps != (self.gps_latitude, self.gps_longitude, self.gps_accuracy):
+            self._pending_pids.add("__location__")
+        self._pending_pids.add("__last_update__")
+        self._dirty = True
+        if self._publish_handle is None:
+            self._publish_handle = asyncio.get_running_loop().call_later(5, self._publish_pending)
+        if monotonic() - self._last_save >= 60:
+            self._last_save = monotonic()
+            self._store.async_delay_save(self._data_to_store, 1)
         return updated
+
+    @callback
+    def _publish_pending(self) -> None:
+        self._publish_handle = None
+        for pid in self._pending_new:
+            self._notify("new_pid", pid)
+        for pid in self._pending_pids:
+            self._notify("updated", pid)
+        self._pending_new.clear()
+        self._pending_pids.clear()
+
+    async def async_shutdown(self) -> None:
+        """Cancel delayed publication and flush latest values on clean unload."""
+        if self._publish_handle is not None:
+            self._publish_handle.cancel()
+            self._publish_handle = None
+        if self._dirty:
+            await self._store.async_save(self._data_to_store())
+        self._listeners.clear()
 
 
 def _lookup_case_insensitive(data: dict[str, Any], wanted: str) -> Any:
-    wanted = wanted.lower()
-    for key, value in data.items():
-        if key.lower() == wanted:
-            return value
-    return None
+    return data.get(wanted.lower())
 
 
 def _clean_text(value: Any) -> str | None:

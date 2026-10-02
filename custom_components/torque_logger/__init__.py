@@ -78,6 +78,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data = hass.data.get(DOMAIN, {})
     vehicle = domain_data.get(DATA_VEHICLES, {}).pop(entry.entry_id, None)
     if vehicle is not None:
+        await vehicle.async_shutdown()
         domain_data.get(DATA_ENDPOINTS, {}).pop(vehicle.endpoint_id, None)
 
     return True

@@ -72,7 +72,7 @@ class TorqueGpsTracker(TrackerEntity):
     async def async_added_to_hass(self) -> None:
         @callback
         def handle_vehicle_event(event: str, pid: str | None) -> None:
-            if event == "updated":
+            if event == "updated" and pid == "__location__":
                 self.async_write_ha_state()
 
         self.async_on_remove(self.vehicle.async_add_listener(handle_vehicle_event))
