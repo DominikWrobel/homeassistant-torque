@@ -26,6 +26,8 @@ from .const import (
     STORAGE_VERSION,
 )
 
+from .pid_definitions import apply_defaults
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -112,9 +114,13 @@ class TorqueVehicle:
             except (KeyError, TypeError, ValueError):
                 continue
 
+        for info in self.pids.values():
+            apply_defaults(info)
+
         self.gps_latitude = _to_float(data.get("gps_latitude"))
         self.gps_longitude = _to_float(data.get("gps_longitude"))
-        self.gps_accuracy = _to_float(data.get("gps_accuracy"))
+        # beta.1 stored altitude as accuracy; recompute from actual accuracy PID.
+        self.gps_accuracy = _first_float({}, GPS_ACCURACY_KEYS, self.pids)
 
         raw_last_update = data.get("last_update")
         if isinstance(raw_last_update, str):
@@ -163,6 +169,18 @@ class TorqueVehicle:
             for key, value in payload.items()
             if value is not None
         }
+
+        for key, raw in normalized.items():
+            lower = key.lower()
+            for prefix, field in (("userfullname", "name"), ("usershortname", "short_name"), ("defaultunit", "unit")):
+                if lower.startswith(prefix):
+                    pid = lower[len(prefix):]
+                    info = self.pids.get(pid)
+                    if info is not None:
+                        text = _clean_text(raw)
+                        if text:
+                            setattr(info, field, _normalize_unit(text) if field == "unit" else text)
+                    break
 
         updated = 0
         new_pids: list[str] = []
@@ -225,6 +243,7 @@ class TorqueVehicle:
                 if unit:
                     info.unit = _normalize_unit(_clean_text(unit)) or info.unit
 
+            apply_defaults(self.pids[pid])
             self.pids[pid].value = value
             updated += 1
 

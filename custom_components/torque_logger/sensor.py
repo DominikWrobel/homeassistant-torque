@@ -177,7 +177,7 @@ def _device_class_for(
     normalized_unit = (unit or "").strip()
 
     # Location coordinates must remain plain numeric sensors.
-    if pid in {"gpslat", "gpslon"}:
+    if pid in {"gpslat", "gpslon", "ff1005", "ff1006"}:
         return None
 
     if normalized_unit in {"°C", "°F"}:

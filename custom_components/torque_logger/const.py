@@ -24,8 +24,8 @@ MAX_SENSORS_PER_VEHICLE = 512
 
 GPS_LAT_KEYS = ("gpslat", "kff1006")
 GPS_LON_KEYS = ("gpslon", "kff1005")
-GPS_ACCURACY_KEYS = ("gpsaccuracy", "kff1010")
-GPS_ALTITUDE_KEYS = ("gpsaltitude", "kff1014")
+GPS_ACCURACY_KEYS = ("gpsaccuracy", "kff1239")
+GPS_ALTITUDE_KEYS = ("gpsaltitude", "kff1010")
 GPS_SPEED_KEYS = ("gpsspeed", "kff1001")
 GPS_BEARING_KEYS = ("gpsbearing", "gpsheading", "kff1007")
 
