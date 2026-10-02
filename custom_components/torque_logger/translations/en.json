@@ -1,40 +1,31 @@
 {
-  "title": "Torque Logger",
-  "config": {
-    "step": {
-      "user": {
-        "title": "Add vehicle",
-        "description": "Create a separate Torque endpoint for this vehicle. Example: {example}",
-        "data": {
-          "vehicle_name": "Vehicle name",
-          "endpoint_id": "Endpoint ID (optional)"
+    "config": {
+        "step": {
+            "user": {
+                "description": "For information on how to setup Torque App and this integration, check out the help button.",
+                "data": {
+                    "email": "Email",
+                    "imperial": "Convert to imperial units"
+                }
+            }
         },
-        "data_description": {
-          "endpoint_id": "Leave empty to generate it automatically from the vehicle name."
+        "error": {
+            "email": "Missing email configured on Torque Pro"
+        },
+        "abort": {
+            "single_instance_allowed": "Only a single instance is allowed."
         }
-      }
     },
-    "error": {
-      "vehicle_name_required": "Vehicle name is required.",
-      "invalid_endpoint": "Could not create a valid endpoint ID.",
-      "endpoint_exists": "This endpoint ID is already used by another vehicle."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Vehicle settings",
-        "description": "Current endpoint: {endpoint}",
-        "data": {
-          "vehicle_name": "Vehicle name",
-          "endpoint_id": "Endpoint ID"
+    "options": {
+        "step": {
+            "user": {
+                "data": {
+                    "binary_sensor": "Binary sensor enabled",
+                    "device_tracker": "Device Tracker enabled",
+                    "sensor": "Sensor enabled",
+                    "switch": "Switch enabled"
+                }
+            }
         }
-      }
-    },
-    "error": {
-      "vehicle_name_required": "Vehicle name is required.",
-      "invalid_endpoint": "Could not create a valid endpoint ID.",
-      "endpoint_exists": "This endpoint ID is already used by another vehicle."
     }
-  }
 }
