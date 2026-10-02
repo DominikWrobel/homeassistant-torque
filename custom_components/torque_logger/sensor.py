@@ -1,226 +1,122 @@
-"""Torque Logger sensor platform."""
+"""Sensor platform for Torque Logger."""
 
-from __future__ import annotations
-
-from datetime import datetime
-from typing import Any
-
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
+import logging
+import re
+from typing import TYPE_CHECKING
+from homeassistant.components.sensor import RestoreSensor
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import slugify
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers import entity_registry, device_registry
 
-from .const import DATA_VEHICLES, DOMAIN
-from .models import TorquePid, TorqueVehicle
+from .const import (
+    CITY_ICON, DISTANCE_ICON, DOMAIN,
+    DEFAULT_ICON, FUEL_ICON, HIGHWAY_ICON, SENSOR, SPEED_ICON,
+    TIME_ICON)
+from .entity import TorqueEntity
+
+if TYPE_CHECKING:
+    from .coordinator import TorqueLoggerCoordinator
+
+
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up sensors for one vehicle."""
-    vehicle: TorqueVehicle = hass.data[DOMAIN][DATA_VEHICLES][entry.entry_id]
+        hass: HomeAssistant, entry: ConfigEntry,
+        async_add_entities: AddEntitiesCallback):
+    """Setup sensor platform."""
+    coordinator: 'TorqueLoggerCoordinator' = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator.async_add_sensor = async_add_entities
 
-    entities: list[SensorEntity] = [
-        TorquePidSensor(vehicle, pid)
-        for pid in sorted(vehicle.pids)
+    # Restore previously loaded sensors
+    ent_reg = entity_registry.async_get(hass)
+    dev_reg = device_registry.async_get(hass)
+    devices = [
+        device
+        for device in dev_reg.devices.values()
+        for identifier in device.identifiers
+        if identifier[0] == DOMAIN
     ]
-    entities.append(TorqueLastUpdateSensor(vehicle))
-    async_add_entities(entities)
+    logmsg = f"{len(devices)} devices"
+    _LOGGER.debug(logmsg)
 
-    known = set(vehicle.pids)
+    for device in devices:
+        car_id = list(device.identifiers)[0][1]
+        device_info = DeviceInfo(
+            identifiers=device.identifiers,
+            manufacturer=device.manufacturer,
+            model=device.model,
+            name=device.name,
+            sw_version=device.sw_version
+        )
+        restore_entities = [
+            TorqueSensor(coordinator, entry,
+                         sensor.entity_id[len(SENSOR) + len(car_id) + 2:len(sensor.entity_id)],
+                         device_info)
+            for sensor in ent_reg.entities.values()
+            if sensor.device_id == device.id and sensor.domain == SENSOR
+        ]
+        logmsg = f"Restoring {', '.join([sensor.entity_id for sensor in restore_entities])}"
+        _LOGGER.debug(logmsg)
+        async_add_entities(restore_entities)
 
-    @callback
-    def handle_vehicle_event(event: str, pid: str | None) -> None:
-        if event != "new_pid" or not pid or pid in known:
+
+class TorqueSensor(TorqueEntity, RestoreSensor):
+    """Torque Sensor class."""
+
+    def __init__(self, coordinator: 'TorqueLoggerCoordinator',
+                 config_entry: ConfigEntry, sensor_key: str, device: DeviceInfo):
+        super().__init__(coordinator, config_entry, sensor_key, device)
+
+        if self.coordinator.data is not None and "meta" in self.coordinator.data and self.sensor_key in self.coordinator.data["meta"]:
+            self._attr_native_unit_of_measurement = (self.coordinator
+                                                     .data["meta"][self.sensor_key]["unit"])
+            sensor_name = self.coordinator.data["meta"].get(self.sensor_key)["name"]
+            self._attr_name = sensor_name
+            self._set_icon()
+
+        self.entity_id = f"{SENSOR}.{self._car_id}_{sensor_key}"
+        self._restored_state = None
+
+    @property
+    def native_value(self):
+        """Return the native value of the sensor."""
+        if self.coordinator.data is not None and self.sensor_key in self.coordinator.data:
+            return round(float(self.coordinator.data[self.sensor_key]), 2)
+        elif self._restored_state is not None:
+            return round(float(self._restored_state))
+        else:
+            return None
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        await super().async_added_to_hass()
+        state = await self.async_get_last_state()
+        native_state = await self.async_get_last_sensor_data()
+        if not state or not native_state:
             return
-        known.add(pid)
-        async_add_entities([TorquePidSensor(vehicle, pid)])
+        logmsg = f"Restore state of {self.entity_id} to {native_state}"
+        _LOGGER.debug(logmsg)
+        self._restored_state = native_state.native_value
+        self._attr_name = state.name
+        self._attr_native_unit_of_measurement = native_state.native_unit_of_measurement
+        self._set_icon()
 
-    entry.async_on_unload(vehicle.async_add_listener(handle_vehicle_event))
-
-
-class TorqueBaseSensor(SensorEntity):
-    """Common Torque sensor base."""
-
-    _attr_has_entity_name = True
-
-    def __init__(self, vehicle: TorqueVehicle) -> None:
-        self.vehicle = vehicle
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={vehicle_identifier(self.vehicle)},
-            name=self.vehicle.vehicle_name,
-            manufacturer="Torque",
-            model="OBD-II vehicle",
-        )
-
-
-class TorquePidSensor(TorqueBaseSensor):
-    """One dynamically discovered Torque PID."""
-
-    def __init__(self, vehicle: TorqueVehicle, pid: str) -> None:
-        super().__init__(vehicle)
-        self.pid = pid
-        self._attr_unique_id = f"{vehicle.entry.entry_id}_pid_{pid}"
-        self._attr_suggested_object_id = (
-            f"{vehicle.endpoint_id}_{slugify(self.name_from_pid)}"
-        )
-
-    @property
-    def info(self) -> TorquePid:
-        return self.vehicle.pids[self.pid]
-
-    @property
-    def name_from_pid(self) -> str:
-        info = self.vehicle.pids.get(self.pid)
-        if info:
-            return info.name or info.short_name or f"PID {self.pid.upper()}"
-        return f"PID {self.pid.upper()}"
-
-    @property
-    def name(self) -> str:
-        return self.name_from_pid
-
-    @property
-    def native_value(self) -> Any:
-        return self.info.value
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        return self.info.unit
-
-    @property
-    def state_class(self) -> SensorStateClass | None:
-        if isinstance(self.info.value, (int, float)):
-            return SensorStateClass.MEASUREMENT
-        return None
-
-    @property
-    def device_class(self) -> SensorDeviceClass | None:
-        return _device_class_for(self.info.name, self.info.unit, self.pid)
-
-    @property
-    def icon(self) -> str | None:
-        return _icon_for(self.info.name, self.pid)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {
-            "pid": self.pid,
-            "torque_short_name": self.info.short_name,
-            "torque_unit": self.info.unit,
-            "vehicle_endpoint": f"/api/torque_logger/{self.vehicle.endpoint_id}",
-        }
-
-    async def async_added_to_hass(self) -> None:
-        @callback
-        def handle_vehicle_event(event: str, pid: str | None) -> None:
-            if event == "updated" and pid == self.pid:
-                self.async_write_ha_state()
-
-        self.async_on_remove(self.vehicle.async_add_listener(handle_vehicle_event))
-
-
-class TorqueLastUpdateSensor(TorqueBaseSensor):
-    """Timestamp of the latest Torque upload."""
-
-    _attr_name = "Last update"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, vehicle: TorqueVehicle) -> None:
-        super().__init__(vehicle)
-        self._attr_unique_id = f"{vehicle.entry.entry_id}_last_update"
-        self._attr_suggested_object_id = f"{vehicle.endpoint_id}_last_update"
-
-    @property
-    def native_value(self) -> datetime | None:
-        return self.vehicle.last_update
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {
-            "endpoint": f"/api/torque_logger/{self.vehicle.endpoint_id}",
-            "discovered_pids": len(self.vehicle.pids),
-        }
-
-    async def async_added_to_hass(self) -> None:
-        @callback
-        def handle_vehicle_event(event: str, pid: str | None) -> None:
-            if event == "updated" and pid == "__last_update__":
-                self.async_write_ha_state()
-
-        self.async_on_remove(self.vehicle.async_add_listener(handle_vehicle_event))
-
-
-def vehicle_identifier(vehicle: TorqueVehicle) -> tuple[str, str]:
-    return (DOMAIN, vehicle.entry.entry_id)
-
-
-def _device_class_for(
-    name: str | None,
-    unit: str | None,
-    pid: str,
-) -> SensorDeviceClass | None:
-    text = (name or "").lower()
-    normalized_unit = (unit or "").strip()
-
-    # Location coordinates must remain plain numeric sensors.
-    if pid in {"gpslat", "gpslon", "ff1005", "ff1006"}:
-        return None
-
-    if normalized_unit in {"°C", "°F"}:
-        return SensorDeviceClass.TEMPERATURE
-    if normalized_unit in {"km/h", "mph"}:
-        return SensorDeviceClass.SPEED
-    if normalized_unit in {"V", "mV"}:
-        return SensorDeviceClass.VOLTAGE
-    if normalized_unit in {"A", "mA"}:
-        return SensorDeviceClass.CURRENT
-    if normalized_unit in {"W", "kW"}:
-        return SensorDeviceClass.POWER
-    if normalized_unit in {"Wh", "kWh"}:
-        return SensorDeviceClass.ENERGY
-    if normalized_unit in {"Pa", "hPa", "kPa", "bar", "psi"}:
-        return SensorDeviceClass.PRESSURE
-    if normalized_unit in {"m", "km", "mi", "ft"}:
-        if "altitude" not in text and "accuracy" not in text:
-            return SensorDeviceClass.DISTANCE
-
-    if "battery" in text and normalized_unit == "%":
-        return SensorDeviceClass.BATTERY
-
-    return None
-
-
-def _icon_for(name: str | None, pid: str) -> str | None:
-    text = (name or "").lower()
-
-    if "rpm" in text or "engine speed" in text:
-        return "mdi:engine"
-    if "fuel" in text:
-        return "mdi:gas-station"
-    if "speed" in text:
-        return "mdi:speedometer"
-    if "temperature" in text or "temp" in text:
-        return "mdi:thermometer"
-    if "voltage" in text or "volt" in text:
-        return "mdi:car-battery"
-    if "throttle" in text:
-        return "mdi:car-cruise-control"
-    if "pressure" in text:
-        return "mdi:gauge"
-    if pid in {"gpslat", "gpslon"} or "gps" in text:
-        return "mdi:crosshairs-gps"
-    return None
+    def _set_icon(self) -> None:
+        self._attr_icon = DEFAULT_ICON
+        if re.search('kilometers', self._attr_name, re.IGNORECASE) or re.search('miles', self._attr_name, re.IGNORECASE):
+            self._attr_icon = DISTANCE_ICON
+        if re.search('litre', self._attr_name, re.IGNORECASE) or re.search('gallon', self._attr_name, re.IGNORECASE):
+            self._attr_icon = FUEL_ICON
+        if re.search('distance', self._attr_name, re.IGNORECASE):
+            self._attr_icon = DISTANCE_ICON
+        if re.search('time', self._attr_name, re.IGNORECASE) or re.search('idle', self._attr_name, re.IGNORECASE):
+            self._attr_icon = TIME_ICON
+        if re.search('highway', self._attr_name, re.IGNORECASE):
+            self._attr_icon = HIGHWAY_ICON
+        if re.search('city', self._attr_name, re.IGNORECASE):
+            self._attr_icon = CITY_ICON
+        if re.search('speed', self._attr_name, re.IGNORECASE):
+            self._attr_icon = SPEED_ICON

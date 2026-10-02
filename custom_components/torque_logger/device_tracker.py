@@ -1,78 +1,127 @@
-"""Torque Logger GPS device tracker."""
+"""Device tracker for Torque Logger."""
 
-from __future__ import annotations
+from typing import TYPE_CHECKING
+import logging
 
-from typing import Any
+from homeassistant.components.device_tracker.config_entry import TrackerEntity
+from homeassistant.components.device_tracker.const import (
+    DOMAIN,
+    SourceType
+)
+from homeassistant.const import (
+    ATTR_LATITUDE,
+    ATTR_LONGITUDE,
+    ATTR_GPS_ACCURACY
+)
 
-from homeassistant.components.device_tracker import TrackerEntity
-from homeassistant.components.device_tracker.const import SourceType
+
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers import device_registry
 
-from .const import DATA_VEHICLES, DOMAIN
-from .models import TorqueVehicle
+from .entity import TorqueEntity
+from .const import (ATTR_ALTITUDE, DOMAIN, ENTITY_GPS, GPS_ICON,
+     TORQUE_GPS_ACCURACY, TORQUE_GPS_LAT,
+     TORQUE_GPS_LON)
+if TYPE_CHECKING:
+    from .coordinator import TorqueLoggerCoordinator
 
+_LOGGER: logging.Logger = logging.getLogger(__package__)
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up vehicle GPS tracker."""
-    vehicle: TorqueVehicle = hass.data[DOMAIN][DATA_VEHICLES][entry.entry_id]
-    async_add_entities([TorqueGpsTracker(vehicle)])
+    """Setup device_tracker platform."""
+    coordinator: 'TorqueLoggerCoordinator' = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator.async_add_device_tracker = async_add_entities
 
+    # Restore previously loaded trackers
+    dev_reg = device_registry.async_get(hass)
+    devices = [
+        device
+        for device in dev_reg.devices.values()
+        for identifier in device.identifiers
+        if identifier[0] == DOMAIN
+    ]
+    logmsg = f"{len(devices)} device_tracker to restore"
+    _LOGGER.debug(logmsg)
+    for device in devices:
+        logmsg = f"Restoring {device.model} device_tracker"
+        device_info = DeviceInfo(
+            identifiers=device.identifiers,
+            manufacturer=device.manufacturer,
+            model=device.model,
+            name=device.name,
+            sw_version=device.sw_version
+        )
+        _LOGGER.debug(logmsg)
+        async_add_entities([TorqueDeviceTracker(coordinator, entry, device_info)])
 
-class TorqueGpsTracker(TrackerEntity):
-    """GPS tracker for one configured vehicle."""
+class TorqueDeviceTracker(TorqueEntity, TrackerEntity, RestoreEntity):
+    """Represent a tracked device."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Location"
-
-    def __init__(self, vehicle: TorqueVehicle) -> None:
-        self.vehicle = vehicle
-        self._attr_unique_id = f"{vehicle.entry.entry_id}_location"
-        self._attr_suggested_object_id = f"{vehicle.endpoint_id}_location"
+    def __init__(self, coordinator: 'TorqueLoggerCoordinator',
+    config_entry: ConfigEntry, device: DeviceInfo):
+        super().__init__(coordinator, config_entry, ENTITY_GPS, device)
+        self._attr_name = self._car_name
+        self._attr_icon = GPS_ICON
+        self._restored_state: dict = None
 
     @property
-    def source_type(self) -> SourceType:
+    def battery_level(self):
+        """Return the battery level of the device."""
+        return None
+
+    @property
+    def location_accuracy(self):
+        """Return the gps accuracy of the device."""
+        if self.coordinator.data is not None and TORQUE_GPS_ACCURACY in self.coordinator.data and self.coordinator.data[TORQUE_GPS_ACCURACY] is not None:
+            return float(self.coordinator.data[TORQUE_GPS_ACCURACY])
+        elif self._restored_state is not None and ATTR_GPS_ACCURACY in self._restored_state and self._restored_state[ATTR_GPS_ACCURACY] is not None:
+            return float(self._restored_state[ATTR_GPS_ACCURACY])
+        else:
+            return None
+    @property
+    def latitude(self):
+        """Return latitude value of the device."""
+        if self.coordinator.data is not None and TORQUE_GPS_LAT in self.coordinator.data and self.coordinator.data[TORQUE_GPS_LAT] is not None:
+            return float(self.coordinator.data[TORQUE_GPS_LAT])
+        elif self._restored_state is not None and ATTR_LATITUDE in self._restored_state and self._restored_state[ATTR_LATITUDE] is not None:
+            return float(self._restored_state[ATTR_LATITUDE])
+        else:
+            return None
+    @property
+    def longitude(self):
+        """Return longitude value of the device."""
+        if self.coordinator.data is not None and TORQUE_GPS_LON in self.coordinator.data and self.coordinator.data[TORQUE_GPS_LON] is not None:
+            return float(self.coordinator.data[TORQUE_GPS_LON])
+        elif self._restored_state is not None and ATTR_LONGITUDE in self._restored_state and self._restored_state[ATTR_LONGITUDE] is not None:
+            return float(self._restored_state[ATTR_LONGITUDE])
+        else:
+            return None
+
+    @property
+    def source_type(self):
+        """Return the source type, eg gps or router, of the device."""
         return SourceType.GPS
 
-    @property
-    def latitude(self) -> float | None:
-        return self.vehicle.gps_latitude
+    async def async_added_to_hass(self):
+        """Call when entity about to be added to Home Assistant."""
+        await super().async_added_to_hass()
+        state = await self.async_get_last_state()
+        if state is None:
+            _LOGGER.debug(f"No previous state for {self.entity_id}")
+            return
 
-    @property
-    def longitude(self) -> float | None:
-        return self.vehicle.gps_longitude
-
-    @property
-    def location_accuracy(self) -> int:
-        if self.vehicle.gps_accuracy is None:
-            return 0
-        return max(0, int(round(self.vehicle.gps_accuracy)))
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.vehicle.entry.entry_id)},
-            name=self.vehicle.vehicle_name,
-            manufacturer="Torque",
-            model="OBD-II vehicle",
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {
-            "endpoint": f"/api/torque_logger/{self.vehicle.endpoint_id}",
+        attr = state.attributes
+        _LOGGER.debug(f"Restored state for {self.entity_id}")
+        self._restored_state = {
+            ATTR_ALTITUDE: attr.get(ATTR_ALTITUDE),
+            ATTR_LATITUDE: attr.get(ATTR_LATITUDE),
+            ATTR_LONGITUDE: attr.get(ATTR_LONGITUDE),
+            ATTR_GPS_ACCURACY: attr.get(ATTR_GPS_ACCURACY)
         }
 
-    async def async_added_to_hass(self) -> None:
-        @callback
-        def handle_vehicle_event(event: str, pid: str | None) -> None:
-            if event == "updated" and pid == "__location__":
-                self.async_write_ha_state()
-
-        self.async_on_remove(self.vehicle.async_add_listener(handle_vehicle_event))
